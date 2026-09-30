@@ -1,5 +1,5 @@
 {
-  "buildCommand": "bun run build",
-  "outputDirectory": "dist",
+  "buildCommand": "bun run build:web",
+  "outputDirectory": "dist/web",
   "framework": null
 }
