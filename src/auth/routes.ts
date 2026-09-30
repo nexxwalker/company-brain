@@ -20,8 +20,18 @@ type SlackIdentity = {
 	"https://slack.com/team_name"?: string
 }
 
-function origin(env: Env, requestUrl: string): string {
-	return (env.PUBLIC_URL || new URL(requestUrl).origin).replace(/\/$/, "")
+function origin(env: Env, request: Request): string {
+	if (env.PUBLIC_URL) return env.PUBLIC_URL.replace(/\/$/, "")
+
+	const url = new URL(request.url)
+	// Cloudflare and local tunnels can forward the request as HTTP even though
+	// the browser reached the public app over HTTPS. Slack requires the public
+	// redirect URI to use that external scheme.
+	const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim()
+	if (forwardedProto === "https" || forwardedProto === "http") {
+		url.protocol = `${forwardedProto}:`
+	}
+	return url.origin.replace(/\/$/, "")
 }
 
 export function signInCallbackUrl(origin: string): string {
@@ -120,7 +130,7 @@ export const authRoutes = new Hono<AppContext>()
 		url.searchParams.set("nonce", crypto.randomUUID())
 		url.searchParams.set(
 			"redirect_uri",
-			signInCallbackUrl(origin(c.env, c.req.url)),
+			signInCallbackUrl(origin(c.env, c.req.raw)),
 		)
 		return c.redirect(url.toString())
 	})
@@ -146,7 +156,7 @@ export const authRoutes = new Hono<AppContext>()
 					client_id: credentials.clientId,
 					client_secret: credentials.clientSecret,
 					code,
-					redirect_uri: signInCallbackUrl(origin(c.env, c.req.url)),
+					redirect_uri: signInCallbackUrl(origin(c.env, c.req.raw)),
 				}),
 			},
 		).then((res) => res.json())) as {
