@@ -18,6 +18,7 @@ export const user = sqliteTable("user", {
 	id: text("id").primaryKey().$defaultFn(generateId),
 	name: text("name").notNull().default(""),
 	email: text("email").notNull().unique(),
+	passwordHash: text("password_hash"),
 	image: text("image"),
 	deleted: integer("deleted", { mode: "boolean" }).notNull().default(false),
 	createdAt: integer("created_at", { mode: "timestamp" })

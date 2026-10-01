@@ -221,7 +221,7 @@ export function setupPage(params: PageParams): string {
 		states.signin,
 		"Sign in with Slack",
 		"You're signed in.",
-		`<p>Sign in with your Slack account. The first person to sign in owns this deployment and can change its settings.</p><a class="btn" href="/auth/slack/login">Sign in with Slack</a>`,
+		`<p>Create the first local account. The first person to register owns this deployment and can change its settings.</p><a class="btn" href="/auth/signup">Create local account</a>`,
 	)}
 	${step(
 		"install",
