@@ -49,7 +49,7 @@ function useSlackHandoff() {
 }
 
 export function App() {
-	const { user, org, isRestoring, setupComplete } = useAuth()
+	const { user, org, isRestoring } = useAuth()
 	const { viewMode } = useViewMode()
 	const [handoff, dismissHandoff] = useSlackHandoff()
 

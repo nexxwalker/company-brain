@@ -7,6 +7,30 @@ import { slackCredentials } from "../setup/config-store"
 import type { AppContext } from "@/types"
 import { endSession, startSession } from "./session"
 
+const PASSWORD_ITERATIONS = 120_000
+const encoder = new TextEncoder()
+
+async function passwordHash(password: string): Promise<string> {
+	const salt = crypto.getRandomValues(new Uint8Array(16))
+	const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"])
+	const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: PASSWORD_ITERATIONS, hash: "SHA-256" }, key, 256)
+	return `${btoa(String.fromCharCode(...salt))}.${btoa(String.fromCharCode(...new Uint8Array(bits)))}`
+}
+
+async function passwordMatches(password: string, stored: string): Promise<boolean> {
+	const [saltText, hashText] = stored.trim().split(".")
+	if (!saltText || !hashText) return false
+	const salt = Uint8Array.from(atob(saltText), (char) => char.charCodeAt(0))
+	const expected = Uint8Array.from(atob(hashText), (char) => char.charCodeAt(0))
+	const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"])
+	const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: PASSWORD_ITERATIONS, hash: "SHA-256" }, key, 256))
+	return bits.length === expected.length && bits.every((value, index) => value === expected[index])
+}
+
+function authForm(title: string, action: string, submit: string): Response {
+	return new Response(`<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:16px system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>${title}</h1><form method="post" action="${action}" style="display:grid;gap:1rem"><input name="name" placeholder="Name" autocomplete="name"><input name="email" type="email" placeholder="Email" autocomplete="email" required><input name="password" type="password" placeholder="Password" autocomplete="new-password" minlength="12" required><button>${submit}</button></form><p><a href="/">Back to sign in</a></p></body>`, { headers: { "content-type": "text/html; charset=utf-8" } })
+}
+
 const STATE_TTL_SECONDS = 600
 
 type SlackIdentity = {
@@ -20,8 +44,18 @@ type SlackIdentity = {
 	"https://slack.com/team_name"?: string
 }
 
-function origin(env: Env, requestUrl: string): string {
-	return (env.PUBLIC_URL || new URL(requestUrl).origin).replace(/\/$/, "")
+function origin(env: Env, request: Request): string {
+	if (env.PUBLIC_URL) return env.PUBLIC_URL.replace(/\/$/, "")
+
+	const url = new URL(request.url)
+	// Cloudflare and local tunnels can forward the request as HTTP even though
+	// the browser reached the public app over HTTPS. Slack requires the public
+	// redirect URI to use that external scheme.
+	const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim()
+	if (forwardedProto === "https" || forwardedProto === "http") {
+		url.protocol = `${forwardedProto}:`
+	}
+	return url.origin.replace(/\/$/, "")
 }
 
 export function signInCallbackUrl(origin: string): string {
@@ -104,6 +138,39 @@ export const authRoutes = new Hono<AppContext>()
 			role: c.get("memberRole"),
 		})
 	})
+	.get("/signup", () => authForm("Create your Emberspack account", "/auth/signup", "Create account"))
+	.post("/signup", async (c) => {
+		const body = await c.req.parseBody()
+		const email = String(body.email ?? "").trim().toLowerCase()
+		const name = String(body.name ?? email).trim().slice(0, 120) || email
+		const password = String(body.password ?? "")
+		if (!email || password.length < 12) return refuse("Use a valid email and a password with at least 12 characters.", 400)
+		const [existing] = await db(c.env).select({ id: user.id }).from(user).where(sql`lower(${user.email}) = ${email}`).limit(1)
+		if (existing) return refuse("An account with that email already exists. Sign in instead.", 409)
+		const [org] = await db(c.env).select().from(organization).orderBy(asc(organization.createdAt)).limit(1)
+		let orgId = org?.id
+		if (!orgId) {
+			const [createdOrg] = await db(c.env).insert(organization).values({ name: "Emberspack", slug: "emberspack" }).returning({ id: organization.id })
+			orgId = createdOrg?.id
+		}
+		if (!orgId) return refuse("Couldn't create the workspace.", 409)
+		const [created] = await db(c.env).insert(user).values({ email, name, passwordHash: await passwordHash(password) }).returning({ id: user.id })
+		if (!created) return refuse("Couldn't create your account.", 409)
+		await db(c.env).insert(member).values({ organizationId: orgId, userId: created.id, role: ROLE_OWNER }).onConflictDoNothing({ target: [member.organizationId, member.userId] })
+		await startSession(c, created.id, orgId)
+		return c.redirect("/")
+	})
+	.post("/login", async (c) => {
+		const body = await c.req.parseBody()
+		const email = String(body.email ?? "").trim().toLowerCase()
+		const password = String(body.password ?? "")
+		const [account] = await db(c.env).select({ id: user.id, passwordHash: user.passwordHash }).from(user).where(sql`lower(${user.email}) = ${email}`).limit(1)
+		if (!account?.passwordHash || !(await passwordMatches(password, account.passwordHash))) return refuse("Invalid email or password.", 403)
+		const [membership] = await db(c.env).select({ organizationId: member.organizationId }).from(member).where(eq(member.userId, account.id)).limit(1)
+		if (!membership) return refuse("Your account is not assigned to a workspace.", 403)
+		await startSession(c, account.id, membership.organizationId)
+		return c.redirect("/")
+	})
 	.get("/slack/login", async (c) => {
 		const credentials = await slackCredentials(c.env)
 		if (!credentials) return c.redirect("/setup")
@@ -120,7 +187,7 @@ export const authRoutes = new Hono<AppContext>()
 		url.searchParams.set("nonce", crypto.randomUUID())
 		url.searchParams.set(
 			"redirect_uri",
-			signInCallbackUrl(origin(c.env, c.req.url)),
+			signInCallbackUrl(origin(c.env, c.req.raw)),
 		)
 		return c.redirect(url.toString())
 	})
@@ -146,7 +213,7 @@ export const authRoutes = new Hono<AppContext>()
 					client_id: credentials.clientId,
 					client_secret: credentials.clientSecret,
 					code,
-					redirect_uri: signInCallbackUrl(origin(c.env, c.req.url)),
+					redirect_uri: signInCallbackUrl(origin(c.env, c.req.raw)),
 				}),
 			},
 		).then((res) => res.json())) as {

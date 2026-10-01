@@ -1,13 +1,10 @@
 import { dmSans125ClassName, dmSansClassName } from "@lib/fonts"
-import { cn } from "@lib/utils"
-
 const cardStyle = {
 	boxShadow:
 		"0 2.842px 14.211px 0 rgba(0, 0, 0, 0.25), 0.711px 0.711px 0.711px 0 rgba(255, 255, 255, 0.10) inset",
 }
 
-// Shown to anyone without a session. Sign-in goes through the deployment's
-// own Slack app; /setup is where that app gets configured in the first place.
+// Local account sign-in for the self-hosted Emberspack platform.
 export function SignIn() {
 	return (
 		<main className="flex min-h-screen items-center justify-center bg-[#05080D] px-4">
@@ -20,19 +17,20 @@ export function SignIn() {
 						"text-[20px] font-semibold text-[#FAFAFA]",
 					)}
 				>
-					Company Brain
+					Emberspack Slack
 				</h1>
 				<p className={dmSansClassName("mt-2 text-[13px] text-[#8B929E]")}>
-					Sign in with the Slack workspace this brain belongs to.
+					Sign in to your self-hosted Emberspack workspace.
 				</p>
-				<a
-					href="/auth/slack/login"
-					className={cn(
-						dmSansClassName(),
-						"mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] bg-[#FAFAFA] text-[14px] font-medium text-[#0B0E13] transition-colors hover:bg-white",
-					)}
-				>
-					Sign in with Slack
+				<form method="post" action="/auth/login" className="mt-6 flex flex-col gap-3">
+					<input name="email" type="email" autoComplete="email" required placeholder="Email address" className="h-10 rounded-[10px] border border-[#2C313A] bg-[#0B0E13] px-3 text-[14px] text-[#FAFAFA] outline-none placeholder:text-[#737B87] focus:border-[#FAFAFA]" />
+					<input name="password" type="password" autoComplete="current-password" required placeholder="Password" className="h-10 rounded-[10px] border border-[#2C313A] bg-[#0B0E13] px-3 text-[14px] text-[#FAFAFA] outline-none placeholder:text-[#737B87] focus:border-[#FAFAFA]" />
+					<button type="submit" className="flex h-10 w-full items-center justify-center rounded-[10px] bg-[#FAFAFA] text-[14px] font-medium text-[#0B0E13] transition-colors hover:bg-white">
+						Sign in
+					</button>
+				</form>
+				<a href="/auth/signup" className={dmSansClassName("mt-4 block text-center text-[12px] text-[#A8B0BC] hover:text-[#FAFAFA]")}>
+					Create a local account
 				</a>
 				<a
 					href="/setup"
